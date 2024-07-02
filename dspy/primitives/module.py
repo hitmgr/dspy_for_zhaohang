@@ -105,10 +105,18 @@ class BaseModule:
         for name, param in self.named_parameters():
             param.load_state(state[name])
 
+    # def save(self, path):
+    #     with open(path, "w") as f:
+    #         f.write(ujson.dumps(self.dump_state(), indent=2))
+
+    # def load(self, path):
+    #     with open(path) as f:
+    #         self.load_state(ujson.loads(f.read()))
+
     def save(self, path):
-        with open(path, "w") as f:
-            f.write(ujson.dumps(self.dump_state(), indent=2))
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(ujson.dumps(self.dump_state(), indent=2, ensure_ascii=False))
 
     def load(self, path):
-        with open(path) as f:
+        with open(path, "r", encoding="utf-8") as f:
             self.load_state(ujson.loads(f.read()))

@@ -107,7 +107,11 @@ class MIPROv2(Teleprompter):
         self.minibatch_full_eval_steps = minibatch_full_eval_steps
 
         # Check if WANDB_RUN_ID is set in the environment
-        self.wandb_run_id = None
+        # self.wandb_run_id = None
+        # 新增: 如果环境变量中没有WANDB_RUN_ID,则创建一个新的
+        if "WANDB_RUN_ID" not in os.environ:
+            os.environ["WANDB_RUN_ID"] = wandb.util.generate_id()
+        self.wandb_run_id = os.environ["WANDB_RUN_ID"]
     
     def _get_batch_size(
         self,
@@ -236,6 +240,15 @@ class MIPROv2(Teleprompter):
                     id=self.wandb_run_id,
                     resume="must",
                 )
+                
+                # 新增: 记录实验配置
+                wandb.config.update({
+                    "num_candidates": self.n,
+                    "init_temperature": self.init_temperature,
+                    "num_batches": num_batches,
+                    "max_bootstrapped_demos": max_bootstrapped_demos,
+                    "max_labeled_demos": max_labeled_demos,
+                })
 
             # Setup random seeds
             random.seed(seed)
@@ -416,14 +429,22 @@ class MIPROv2(Teleprompter):
                     trial_logs[trial.number]["total_eval_calls_so_far"] = total_eval_calls
                     trial_logs[trial.number]["program"] = candidate_program.deepcopy()
                     if self.wandb_run_id:
-                        wandb.log(
-                            {
-                                "score": score,
-                                "num_eval_calls": trial_logs[trial.number]["num_eval_calls"],
-                                "total_eval_calls": total_eval_calls,
-                            },
-                        )
+                        wandb.log({
+                            "trial_number": trial.number,
+                            "score": score,
+                            "num_eval_calls": trial_logs[trial.number]["num_eval_calls"],
+                            "total_eval_calls": total_eval_calls,
+                            "best_score_so_far": best_score,
+                            "instruction_indices": chosen_params,  # 记录选择的指令索引
+                        })
 
+                    # 新增: 创建指令选择表格
+                    if self.wandb_run_id:
+                        instruction_table = wandb.Table(columns=["Trial", "Predictor", "Instruction"])
+                        for predictor, instruction_idx in enumerate(chosen_params):
+                            instruction_table.add_data(trial.number, predictor, instruction_candidates[predictor][instruction_idx])
+                        wandb.log({"instruction_choices": instruction_table})
+                        
                     # Update the best program if the current score is better, and if we're not using minibatching
                     best_score_updated = False
                     if score > best_score and trial_logs[trial.number]["full_eval"] and not minibatch:
@@ -432,6 +453,9 @@ class MIPROv2(Teleprompter):
                         best_program = candidate_program.deepcopy()
                         best_score_updated = True
                         
+                        # 新增: 保存最佳模型
+                        if self.wandb_run_id:
+                            wandb.log({"best_model": wandb.Artifact(name="best_model", type="model")})
 
                     # If we're doing minibatching, check to see if it's time to do a full eval
                     if minibatch and trial.number % self.minibatch_full_eval_steps == 0:
@@ -505,5 +529,9 @@ class MIPROv2(Teleprompter):
                 with open(optuna_study_file_path, "wb") as file:
                     pickle.dump(study, file)
 
+            # 优化结束后
+            if self.wandb_run_id:
+                wandb.finish()  # 确保所有数据都已同步到wandb
+                
             return best_program
         return student
